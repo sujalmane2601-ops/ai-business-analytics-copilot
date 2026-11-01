@@ -1,94 +1,249 @@
 # AI-Powered Business Analytics Copilot
 
-Ask business questions in plain English. A local LLM (Ollama) writes SQL over 1M+ retail transactions, and every answer is checked against hand-written SQL.
+Ask business questions in plain English. A local AI model writes the SQL, the app runs it on 1M+ retail transactions, and every answer is checked against SQL I wrote by hand.
 
-## Demo
+**Built with:** Python, SQLite, pandas, Ollama (qwen2.5-coder:3b), Streamlit
 
-![Streamlit app](screenshots/01_app_good_answer.png)
-![Dashboard](screenshots/06_dashboard.png)
+---
 
-Video walkthrough: <<FILL: your Loom link>>
+## What is this project?
 
-## Tech stack
+A business person often asks questions like *"What was our revenue each month?"* or *"Which products sell the most?"* Normally an analyst has to write SQL code to answer them.
 
-Python, SQLite, pandas, Ollama (qwen2.5-coder:3b), Streamlit, Power BI
+This project lets you **type the question in normal English**. Then:
 
-## Dataset
+1. An AI model (running on my own laptop through [Ollama](https://ollama.com), no cloud and no API key) turns the question into SQL.
+2. The app runs that SQL on the sales data.
+3. It shows a table, a chart, the SQL it used, and a short written summary.
 
-Online Retail II (UCI Machine Learning Repository): 1,067,371 transaction lines, 5,942 customers, 43 countries and 5,305 products, from Dec 2009 to Dec 2011, in GBP. After cleaning, 1,037,004 lines remain in the `sales` view and 18,285 in the `returns` view.
+AI can make mistakes, so I did not just trust it. I wrote the correct SQL for 12 test questions by hand and measured how often the AI gets the same answer. The mistakes I found are listed below, honestly.
 
-## How it works
+**Dataset:** Online Retail II from the UCI Machine Learning Repository. It has 1,067,371 rows of sales from a UK online gift shop, from December 2009 to December 2011, in British pounds (GBP).
 
-1. `load_data.py` loads the CSV into SQLite and builds two clean views, `sales` and `returns`.
-2. `copilot.py` sends the question, the schema and business rules to the local model. The SQL runs on a read-only connection with a SELECT-only guard. If the SQL errors, the error is sent back to the model for up to 2 retries. A second model call writes a short insight using only numbers from the result table.
-3. `app.py` is the Streamlit interface: question box, insight, result table, chart and the generated SQL.
-4. `copilot.py` also includes a sanity check that warns when a percentage or rate column falls outside 0 to 100.
-5. `ground_truth.py` holds <<FILL: N>> hand-written SQL questions with answers I checked myself. `validate.py` runs each question through the model, compares the numbers and writes `eval_log.csv`.
-6. `inspect_failures.py` prints the AI's SQL beside the correct SQL for every failed question. `compare_logs.py` compares two logs on the same questions.
+---
 
-## Data cleaning decisions
+## Screenshots
 
-- Cancelled invoices (invoice numbers starting with "C", negative quantities) are separated into a `returns` view.
-- Fee and non-product codes (POST, ADJUST, AMAZONFEE and similar) are excluded from `sales`.
-- Lines with no Customer ID (243,007 lines, about 23%) are kept for revenue but excluded from customer counts.
-- Zero or negative prices (6,207 lines) are excluded from `sales`.
-- Duplicate rows (34,335) are kept, because the same item can be scanned twice on one invoice.
-- A product is identified by `stock_code`. 646 stock codes have more than one description, so grouping by description gives different totals.
+### The app
+
+![App home screen](screenshots/01_app_home.png)
+
+### Asking for monthly revenue
+
+The app shows the summary, the result table, and the SQL the AI wrote, so you can check it.
+
+![Monthly revenue answer](screenshots/02_app_monthly_revenue.png)
+
+![Monthly revenue chart](screenshots/03_app_monthly_revenue_chart.png)
+
+### Asking for the top 10 products
+
+![Top 10 products summary](screenshots/04_app_top10_insight.png)
+
+![Top 10 products table and SQL](screenshots/05_app_top10_sql_and_table.png)
+
+![Top 10 products chart](screenshots/06_app_top10_chart.png)
+
+### Sales dashboard
+
+An interactive dashboard on the same cleaned data, with a country filter, four headline numbers, revenue by month, top 10 products and top 10 countries (excluding the UK). Its numbers match my hand-written SQL answers (average order value £508.91 and repeat customers 72.35%).
+
+![Sales dashboard](screenshots/13_dashboard.png)
+
+---
+
+## How the project works (flowchart)
+
+```mermaid
+flowchart TD
+    A["Online Retail II CSV (1M+ rows)"] --> B["load_data.py: clean the data and load it into SQLite"]
+    B --> C[("retail.db")]
+    C --> D["sales view: only real product sales"]
+    C --> E["returns view: cancelled orders"]
+
+    Q["User types a question in the Streamlit app"] --> G["copilot.py: sends question + data rules to the AI"]
+    D --> G
+    E --> G
+    G --> H["Local AI model (Ollama, qwen2.5-coder:3b) writes SQL"]
+    H --> I{"Is it a safe read-only SELECT?"}
+    I -->|No| X["Blocked"]
+    I -->|Yes| J["Run the SQL on retail.db"]
+    J -->|Error| K["Send the error back to the AI and retry (up to 2 times)"]
+    K --> H
+    J -->|Success| L["Result table + chart"]
+    L --> M["AI writes a short summary using only the numbers in the table"]
+    M --> N["Answer shown in the app, with the SQL visible"]
+
+    T["ground_truth.py: 12 questions with hand-written correct SQL"] --> V["validate.py: compare AI answers with correct answers"]
+    H -.->|AI SQL| V
+    V --> R["eval_log.csv + accuracy score"]
+```
+
+---
+
+## How I built it, step by step
+
+**Step 1: Get and explore the data.**
+I downloaded the Online Retail II file and looked at it with pandas before using any AI. The data is messy:
+- 19,494 lines are cancelled orders (the invoice number starts with "C" and quantities are negative)
+- Some "products" are really fees, such as postage (`POST`), `ADJUST` and `AMAZONFEE`
+- 243,007 lines have no customer ID (guest checkouts)
+- 6,207 lines have a price of zero or below
+- 34,335 rows are exact duplicates (I kept them, because the same item can be scanned twice on one order)
+
+**Step 2: Clean the data and put it in a database.**
+`load_data.py` loads everything into a SQLite database and creates two clean "views":
+- `sales`: real product sales only (1,037,004 lines)
+- `returns`: cancelled and returned lines (18,285 lines)
+
+The AI only looks at these clean views, not the messy raw table. This alone prevents many mistakes.
+
+**Step 3: Write the answer key.**
+In `ground_truth.py` I wrote the correct SQL by hand for 12 business questions (total revenue, monthly revenue, top products, top countries, average order value, repeat customers, return rate and more). I checked each answer myself. This is what the AI gets graded against.
+
+**Step 4: Build the copilot engine.**
+`copilot.py` does the main work:
+- Sends the question to the local AI model, together with the table description and some business rules (for example "an order is a distinct invoice, not a row")
+- Only allows a single read-only `SELECT` query, on a read-only database connection, so the AI can never change the data
+- If the SQL fails, it sends the error back to the AI to fix it, up to 2 times
+- Asks the AI for a short summary that may only use numbers already in the result table
+
+**Step 5: Build the app.**
+`app.py` is a Streamlit web app with example buttons, a question box, the summary, the result table, an automatic chart, and the SQL shown so a person can check it.
+
+**Step 6: Test the AI against the answer key.**
+`validate.py` asks the AI all the test questions, compares each result with my hand-written answer, and saves everything to `eval_log.csv`. I ran it for two different models.
+
+**Step 7: Find the mistakes and fix what I could.**
+`inspect_failures.py` shows the AI's SQL next to the correct answer for every failed question. I added clearer business rules to the prompt (for example "a product is identified by its stock code" and "return questions must use the returns view") and measured again.
+
+**Step 8: Build a dashboard.**
+I built a dashboard on the same cleaned data, and compared its headline numbers (average order value and repeat-customer rate) with my hand-written SQL answers.
+
+---
 
 ## Results
 
-All results use the same local model setup. Accuracy means the model's result matched my hand-written SQL result.
+I tested two small models that run on a normal laptop:
 
-| Version | Model | Questions | Accuracy |
+| Test set | Model | Correct answers | Accuracy |
 |---|---|---|---|
-| Baseline | gemma2:2b | 12 | 42% (5/12) |
-| Baseline | qwen2.5-coder:3b | 12 | 75% (9/12) |
-| After business rules | qwen2.5-coder:3b | <<FILL: N>> | <<FILL: x% (a/N)>> |
-| After few-shot examples | qwen2.5-coder:3b | <<FILL: N>> | <<FILL: x% (a/N)>> |
+| First 7 questions | qwen2.5-coder:3b | 4 of 7 | 57% |
+| First 7 questions | gemma2:2b | 3 of 7 | 43% |
+| All 12 questions | gemma2:2b | 5 of 12 | 42% |
+| All 12 questions | qwen2.5-coder:3b | 9 of 12 | 75% |
 
-Notes:
-- The test set is small, so one question moves the score by 8 points. Treat the comparison as an early result.
-- One question (top 10 products) was reworded after I found its answer key was ambiguous, so it is left out of the before-and-after comparison.
-- Logs for every run are in this repo (`eval_log_*.csv`).
+**What this shows:** the coding-focused model (Qwen) is clearly better at writing SQL than the general model (Gemma) on the same questions.
 
-## Where the AI failed
+**Please note:** the 57% score was measured on the first 7 questions, and the 75% score on all 12 questions, so they are not a fair before-and-after comparison. Twelve questions is also a small test, so treat these numbers as early results.
 
-Qwen2.5-Coder 3B got three of the first 12 questions wrong. Two were real model errors:
+![Qwen on 7 questions](screenshots/09_validation_qwen_7_questions.png)
 
-**1. Repeat customers**
-- Question: What percentage of customers made more than one purchase?
-- AI SQL: `SELECT CAST(COUNT(CASE WHEN customer_id IS NOT NULL THEN customer_id ELSE NULL END) AS REAL) * 100 / COUNT(DISTINCT customer_id) FROM sales`
-- Wrong answer: 13,715.55%. Correct answer: 72.35%.
-- Why: it counted order lines instead of customers with more than one distinct invoice.
-- Fix: <<FILL: the rule or example you added, and whether it passed afterwards>>
+![Qwen vs Gemma on 7 questions](screenshots/10_validation_qwen_vs_gemma_7_questions.png)
 
-**2. Return rate**
-- Question: What is the return rate by value, as a percent of sales revenue?
-- AI SQL: `SELECT CAST(SUM(CASE WHEN line_total < 0 THEN line_total ELSE 0 END) AS REAL) * 100 / SUM(line_total) AS return_rate FROM sales`
-- Wrong answer: 0.0%. Correct answer: 3.61%.
-- Why: it queried the `sales` view, where cancellations are already removed, instead of the `returns` view. The wrong answer looks plausible, which makes it the dangerous kind.
-- Fix: <<FILL: the rule or example you added, and whether it passed afterwards>>
+![Gemma on 12 questions](screenshots/11_validation_gemma_12_questions.png)
 
-The third failure was a flaw in my test: "top 10 products" has more than one valid answer, so I fixed the answer key and defined a product by `stock_code`.
+![Qwen on 12 questions](screenshots/12_validation_qwen_12_questions.png)
 
-## Dashboard
+---
 
-A Power BI page built on `sales_clean.csv` (exported from the `sales` view) with revenue, orders, average order value and customers as cards, plus revenue by month, top 10 products, top 10 countries excluding the UK and a country slicer. Total revenue on the dashboard (about 20.11M) matches the SQL answer of 20,110,181.
+## Where the AI got it wrong
 
-## How to run
+This is the most important part of the project. Small AI models make confident mistakes, and the answer-key test caught them.
 
-1. Install [Ollama](https://ollama.com) and run: `ollama pull qwen2.5-coder:3b`
-2. Create and activate a virtual environment, then run: `pip install -r requirements.txt`
-3. Download `online_retail_II.csv` (UCI Online Retail II dataset) into the project folder. It is not included in this repo because of its size.
-4. Run: `python load_data.py online_retail_II.csv`
-5. Run the app: `streamlit run app.py`
-6. Run the evaluation: `python validate.py`
+**1. Repeat customers: 13,715% instead of 72.35%.**
+The question was "what percentage of customers made more than one purchase?" The AI counted all order lines instead of counting customers with more than one distinct order. A percentage over 100 is impossible, which made the error easy to spot.
 
-To try another model without editing code on Windows: `set COPILOT_MODEL=gemma2:2b` and then `python validate.py`.
+**2. Return rate: 0% (and 100% in the app) instead of 3.61%.**
+The AI looked for negative amounts in the `sales` view, where cancellations have already been removed, so it found none. It should have used the `returns` view. The app then turned the wrong number into a nonsense summary about "return on investment".
 
-## Limitations
+![Wrong return rate](screenshots/08_app_wrong_answer_return_rate.png)
 
-- Small local models make mistakes on ambiguous questions and on window functions.
-- The test set is small (<<FILL: N>> questions), so accuracy numbers are approximate.
-- The sanity check only flags columns whose names contain "pct", "percent" or "rate".
-- Results were measured on one machine with one dataset.
+**3. Countries outside the UK: wrong filter and an invented number.**
+The AI wrote `country != 'UK'`, but the data uses the name `United Kingdom`, so the UK stayed in the result. The written summary then claimed France and Germany earned £1,723,390,129 each, a number that is not in the table at all.
+
+![Wrong answer for countries](screenshots/07_app_wrong_answer_countries.png)
+
+**4. Top 10 products: the question has more than one valid answer.**
+646 stock codes in this dataset have more than one description. Grouping by stock code, by description, or by both gives three slightly different top-10 lists. My first answer key was ambiguous. After I added the rule "a product is identified by its stock code", the generated SQL groups by `stock_code` (see the SQL in the top-10 screenshot above).
+
+**What I took from this:**
+- Always read the SQL the AI wrote. A wrong number can look believable.
+- A test set only works if the questions have one clear answer.
+- The written summary can be wrong even when the table is right, so the app always shows the SQL and the table next to the summary.
+
+---
+
+## Known limitations
+
+- Small local models still fail on harder questions, especially the percentage and return-rate ones.
+- The summary text sometimes picks one number from the table and presents it as the whole answer, or misreads a number.
+- 12 test questions is a small sample.
+- The app does not remember earlier questions (every question is separate).
+
+## Ideas for next steps
+
+- Automatically flag impossible results (for example a percentage above 100) before showing them
+- Add few-shot example questions to the AI prompt and measure the change on a separate held-out set of questions
+- Try a larger model (for example `qwen2.5-coder:7b`) and compare accuracy
+- Add more test questions with window functions (month-over-month growth, running totals)
+
+---
+
+## Project files
+
+| File | What it does |
+|---|---|
+| `explore.py` | First look at the raw data and its problems |
+| `load_data.py` | Cleans the data and builds the SQLite database with the `sales` and `returns` views |
+| `check.py` | Quick check that the database loaded correctly |
+| `ground_truth.py` | The 12 test questions with hand-written correct SQL |
+| `copilot.py` | The engine: question to SQL to result to summary |
+| `test_copilot.py` | Tries one question from the terminal |
+| `app.py` | The Streamlit web app |
+| `validate.py` | Grades the AI against the answer key and writes `eval_log.csv` |
+| `inspect_failures.py` | Shows the AI's wrong SQL next to the correct answer |
+| `screenshots/` | Images used in this README |
+
+---
+
+## How to run it
+
+You need Python 3.10 or newer and [Ollama](https://ollama.com/download).
+
+```
+# 1. Download a model
+ollama pull qwen2.5-coder:3b
+
+# 2. Create and activate a virtual environment (Windows)
+python -m venv venv
+venv\Scripts\activate
+
+# 3. Install the libraries
+pip install -r requirements.txt
+
+# 4. Put online_retail_II.csv in this folder, then build the database
+python load_data.py
+
+# 5. Start the app
+streamlit run app.py
+
+# 6. (Optional) Test the AI against the answer key
+python validate.py
+```
+
+The dataset is not included in this repository because of its size. Download **Online Retail II** from the UCI Machine Learning Repository and save it as `online_retail_II.csv` in the project folder.
+
+To try another model, set the model name before running (Windows):
+
+```
+set COPILOT_MODEL=gemma2:2b
+python validate.py
+```
+
+---
+
+## Author
+
+**Sujal Mane**, data science graduate (B.E. Electronics and Telecommunication).
+Dataset credit: UCI Machine Learning Repository, Online Retail II.
