@@ -11,9 +11,15 @@ GROUND_TRUTH = [
     },
     {
         'question': 'What are the top 10 products by revenue?',
-        'sql': '''SELECT description, ROUND(SUM(line_total), 2) AS revenue
-                  FROM sales GROUP BY stock_code, description
-                  ORDER BY revenue DESC LIMIT 10''',
+        'sql': 
+                                        '''SELECT
+    stock_code,
+    MAX(description) AS description,
+    SUM(line_total) AS revenue
+FROM sales
+GROUP BY stock_code
+ORDER BY revenue DESC
+LIMIT 10;'''
     },
     {
         'question': 'What are the top 5 countries by revenue excluding the United Kingdom?',

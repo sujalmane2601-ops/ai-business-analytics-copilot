@@ -31,10 +31,33 @@ BUSINESS RULES
 - Number of customers = COUNT(DISTINCT customer_id); exclude NULL customer_id.
 - Average order value = revenue / COUNT(DISTINCT invoice).
 - Return rate = ABS(SUM(line_total) from returns) / SUM(line_total) from sales.
+- A product is identified by stock_code. Product questions must GROUP BY stock_code only. Show stock_code, and optionally MAX(description) AS description.
+- Percentages are numbers from 0 to 100 rounded to 2 decimals (3.61 means 3.61 percent), never fractions.
+- Return and refund questions must use the returns view, never sales. Wrap return sums in ABS().
+- A repeat customer is a customer with more than one DISTINCT invoice. Count customers, not order lines.
 '''
+
+EXAMPLES = '''
+Examples:
+Q: What is the total value of returns for the United Kingdom?
+SQL: SELECT ROUND(ABS(SUM(line_total)), 2) AS returned_value FROM returns WHERE country = 'United Kingdom'
+
+Q: How many customers placed exactly one order?
+SQL: SELECT COUNT(*) AS customers FROM (SELECT customer_id FROM sales WHERE customer_id IS NOT NULL GROUP BY customer_id HAVING COUNT(DISTINCT invoice) = 1)
+
+Q: What are the 5 products with the highest quantity sold?
+SQL: SELECT stock_code, MAX(description) AS description, SUM(quantity) AS units FROM sales GROUP BY stock_code ORDER BY units DESC LIMIT 5
+
+Q: How many orders were placed each month?
+SQL: SELECT SUBSTR(invoice_date, 1, 7) AS month, COUNT(DISTINCT invoice) AS orders FROM sales GROUP BY month ORDER BY month
+
+'''
+
 
 SQL_SYSTEM = f'''You are a careful analytics engineer. Convert the user's business
 question into ONE read-only SQLite query using the schema below.
+
+
 
 {SCHEMA_DOC}
 
