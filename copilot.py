@@ -139,4 +139,16 @@ def ask(question, with_summary=True):
            'attempts': attempt + 1, 'summary': None}
     if df is not None and with_summary and not df.empty:
         out['summary'] = summarize(question, df)
+
     return out
+
+def sanity_warnings(df):
+    warnings = []
+    for col in df.columns:
+        name = col.lower()
+        if ('pct' in name or 'percent' in name or 'rate' in name) and df[col].dtype != object:
+            if (df[col] > 100).any() or (df[col] < 0).any():
+                warnings.append(f"'{col}' is outside 0-100, so this result is probably wrong.")
+    if df.empty:
+        warnings.append('The query returned no rows.')
+    return warnings

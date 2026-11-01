@@ -1,6 +1,6 @@
 import streamlit as st
 
-from copilot import ask
+from copilot import ask, sanity_warnings
 
 st.set_page_config(page_title='Business Analytics Copilot', layout='wide')
 st.title('AI-Powered Business Analytics Copilot')
@@ -43,3 +43,6 @@ if question:
             st.subheader('Generated SQL (verify me)')
             st.code(res['sql'], language='sql')
             st.caption(f'Attempts: {res["attempts"]} | Rows: {len(df)}')
+
+        for w in sanity_warnings(df):
+            st.warning(w)
