@@ -1,0 +1,18 @@
+# Python environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Data files (too big for GitHub)
+*.csv
+*.db
+*.sqlite
+
+# Keep the evaluation logs (proof of accuracy)
+!eval_log*.csv
+
+# Secrets
+.env
